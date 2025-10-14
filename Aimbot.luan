@@ -1,0 +1,243 @@
+-- Aimbot Lua (Roblox) — Human-like + Smooth + Prediction
+-- Works with Delta, Synapse, etc.
+-- Made: Oct 2025
+-- WARNING: Using this may result in bans. Use on private servers.
+
+if not game or not workspace then return end
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then return end
+local Camera = workspace.CurrentCamera
+
+-- ===== CONFIG =====
+getgenv().Aimbot = {
+    Enabled = false,                -- global switch
+    AimKey = Enum.UserInputType.MouseButton2, -- hold this to aim (MouseButton2 = right click)
+    ToggleKey = Enum.KeyCode.T,     -- press to toggle lock mode
+    UseHoldToAim = true,            -- if false, toggle mode (press ToggleKey to enable)
+    Smoothness = 8,                 -- larger = smoother/slower (2-20 typical)
+    FOV = 120,                      -- pixels radius (screen space) for target selection
+    TargetPart = "HumanoidRootPart",-- part to aim at
+    Prediction = 0.12,              -- factor to predict movement (seconds * multiplier)
+    TeamCheck = false,              -- skip teammates (if game uses Team property)
+    VisibleCheck = true,            -- check if target is visible (raycast)
+    MaxDistance = 1000,             -- max world distance to consider target
+    AutoSwitchClosest = true,       -- choose closest-in-screen target inside FOV
+    IgnoreList = {},                -- table of names/models to ignore (exact match)
+}
+-- ===================
+
+-- utility
+local function isIgnored(model)
+    for _,name in ipairs(getgenv().Aimbot.IgnoreList) do
+        if model.Name == name then return true end
+    end
+    return false
+end
+
+local function inSameTeam(p1, p2)
+    if not p1 or not p2 then return false end
+    if not p1.Team or not p2.Team then return false end
+    return p1.Team == p2.Team
+end
+
+local function getHumanoidAndRoot(model)
+    if not model then return nil, nil end
+    local humanoid = model:FindFirstChildWhichIsA("Humanoid")
+    local part = model:FindFirstChild(getgenv().Aimbot.TargetPart) or model:FindFirstChildWhichIsA("BasePart")
+    return humanoid, part
+end
+
+-- visibility raycast check
+local function isVisible(pos, origin)
+    local originPos = origin or (Camera and Camera.CFrame.Position) or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart.Position)
+    if not originPos then return true end
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {LocalPlayer.Character}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.IgnoreWater = true
+    local dir = (pos - originPos)
+    local result = workspace:Raycast(originPos, dir, params)
+    if result == nil then
+        return true
+    else
+        -- if hit part is descendant of target pos's parent, it's visible
+        local hit = result.Instance
+        return false
+    end
+end
+
+-- project world pos to screen and return screen position + onScreen boolean
+local function worldToScreen(pos)
+    local screenPos, onScreen = Camera:WorldToScreenPoint(pos)
+    return Vector2.new(screenPos.X, screenPos.Y), onScreen
+end
+
+-- compute 2D distance from mouse or screen center
+local function screenDistance(a, b) return (a - b).Magnitude end
+
+-- get current aim origin (camera position)
+local function aimOrigin()
+    return Camera.CFrame.Position
+end
+
+-- find candidate targets
+local function collectTargets()
+    local t = {}
+    for _,v in ipairs(workspace:GetDescendants()) do
+        if v and v:IsA("Model") and v ~= LocalPlayer.Character then
+            -- quick ignore list
+            if isIgnored(v) then goto cont end
+            local hum, root = getHumanoidAndRoot(v)
+            if hum and root and hum.Health and hum.Health > 0 then
+                -- team check
+                if getgenv().Aimbot.TeamCheck and LocalPlayer and v and isSameTeam and isSameTeam(LocalPlayer, v) then
+                    goto cont
+                end
+                -- distance check
+                local dist = (root.Position - aimOrigin()).Magnitude
+                if dist <= getgenv().Aimbot.MaxDistance then
+                    table.insert(t, {model = v, humanoid = hum, root = root, dist = dist})
+                end
+            end
+        end
+        ::cont::
+    end
+    return t
+end
+
+-- choose best target based on screen distance (or other heuristics)
+local function chooseTarget()
+    local candidates = collectTargets()
+    if #candidates == 0 then return nil end
+
+    local mousePos = UserInputService:GetMouseLocation() -- Mouse location in pixels
+    local screenCenter = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local reference = mousePos -- or screenCenter if you prefer center
+    local best = nil
+    local bestScore = math.huge
+
+    for _,c in ipairs(candidates) do
+        local onScreenPos, onScreen = worldToScreen(c.root.Position)
+        if onScreen then
+            local sd = screenDistance(onScreenPos, reference)
+            if sd <= getgenv().Aimbot.FOV then
+                if getgenv().Aimbot.VisibleCheck then
+                    -- simple line-of-sight check: raycast from camera to target
+                    local origin = aimOrigin()
+                    local params = RaycastParams.new()
+                    params.FilterDescendantsInstances = {LocalPlayer.Character}
+                    params.FilterType = Enum.RaycastFilterType.Blacklist
+                    params.IgnoreWater = true
+                    local dir = (c.root.Position - origin)
+                    local res = workspace:Raycast(origin, dir, params)
+                    if res then
+                        -- if hit something before target root, consider not visible
+                        -- fallback: allow if hit instance is descendant of the target
+                        if not res.Instance:IsDescendantOf(c.model) then
+                            goto skip_candidate
+                        end
+                    end
+                end
+
+                -- scoring: prioritize smaller screen distance, and closer world distance
+                local score = sd + (c.dist * 0.1)
+                if score < bestScore then
+                    bestScore = score
+                    best = c
+                end
+            end
+        end
+        ::skip_candidate::
+    end
+
+    return best
+end
+
+-- prediction: estimate future position
+local function predictPosition(root, predictionFactor)
+    predictionFactor = predictionFactor or getgenv().Aimbot.Prediction
+    local vel = Vector3.new(0,0,0)
+    -- try to get velocity safely
+    pcall(function()
+        vel = root.Velocity or (root.AssemblyLinearVelocity or Vector3.new(0,0,0))
+    end)
+    return root.Position + vel * predictionFactor
+end
+
+-- smooth look at (lerp camera CFrame)
+local function smoothLookAt(targetPos, smooth)
+    smooth = smooth or getgenv().Aimbot.Smoothness
+    if not Camera then return end
+    local camPos = Camera.CFrame.Position
+    local desired = CFrame.new(camPos, targetPos)
+    -- current camera CFrame
+    local cur = Camera.CFrame
+    -- slerp/lerp: use CFrame interpolation via Lerp on components
+    local newCF = cur:Lerp(desired, math.clamp(1 / smooth, 0, 1))
+    Camera.CFrame = newCF
+end
+
+-- main aimbot loop (RenderStepped)
+local aiming = false
+local function updateAimbot(dt)
+    if not getgenv().Aimbot.Enabled then return end
+    if getgenv().Aimbot.UseHoldToAim and not aiming then return end
+
+    local targetData = chooseTarget()
+    if not targetData then return end
+    local rootPart = targetData.root
+    if not rootPart then return end
+
+    -- predicted position
+    local predicted = predictPosition(rootPart, getgenv().Aimbot.Prediction)
+    -- aim at predicted position (slightly above center of mass to hit torso/head)
+    local aimPoint = predicted + Vector3.new(0, 1.2, 0)
+    smoothLookAt(aimPoint, getgenv().Aimbot.Smoothness)
+end
+
+-- input handlers
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    -- hold to aim
+    if input.UserInputType == getgenv().Aimbot.AimKey then
+        aiming = true
+    end
+    -- toggle mode
+    if input.KeyCode == getgenv().Aimbot.ToggleKey then
+        if getgenv().Aimbot.UseHoldToAim then
+            -- convert to toggle mode
+            getgenv().Aimbot.UseHoldToAim = false
+            getgenv().Aimbot.Enabled = true
+            print("[Aimbot] Switched to TOGGLE mode. Enabled =", getgenv().Aimbot.Enabled)
+        else
+            getgenv().Aimbot.Enabled = not getgenv().Aimbot.Enabled
+            print("[Aimbot] Toggled Enabled =", getgenv().Aimbot.Enabled)
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == getgenv().Aimbot.AimKey then
+        aiming = false
+    end
+end)
+
+-- start/stop global toggle via getgenv
+if getgenv().AimbotEnabled == nil then
+    getgenv().AimbotEnabled = true
+end
+getgenv().Aimbot.Enabled = getgenv().Aimbot.Enabled or false
+
+-- connect to RenderStepped for smoothness
+local conn
+conn = RunService.RenderStepped:Connect(function(dt)
+    if getgenv().Aimbot.Enabled and (not getgenv().Aimbot.UseHoldToAim or aiming) then
+        pcall(updateAimbot, dt)
+    end
+end)
+
+print("[Aimbot] Loaded (Oct 2025). Toggle with", tostring(getgenv().Aimbot.ToggleKey), "Hold to aim:", tostring(getgenv().Aimbot.AimKey))
