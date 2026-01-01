@@ -1,4 +1,5 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/Seven7-lua/RedzLibs/refs/heads/main/src/RedzlibV2/source.lua"))();
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Seven7-lua/RedzLibs/refs/heads/main/src/RedzlibV2/source.lua"))()
+
 MakeWindow({
   Hub = {
     Title = "Linh tinh hub : Universal",
@@ -18,6 +19,7 @@ MakeWindow({
     }
   }
 })
+
 MinimizeButton({
   Image = "http://www.roblox.com/asset/?id=",
   Size = {60, 60},
@@ -26,41 +28,53 @@ MinimizeButton({
   Stroke = false,
   StrokeColor = Color3.fromRGB(255, 0, 0)
 })
+
 local Main = MakeTab({
    Name = "Chung"
 });
+
 local Charac = MakeTab({
    Name = "Nhân Vật"
 });
+
 local Server = MakeTab({
    Name = "Máy Chủ"
 });
+
 local Nolag = MakeTab({
    Name = "Fix Lag"
 });
+
 local Status = MakeTab({
    Name = "Trạng Thái"
 });
+
 local Item = MakeTab({
    Name = "Cài Đặt Vật Phẩm"
 });
+
 local Music = MakeTab({
    Name = "Nghe Nhạc"
 });
+
 local Misc = MakeTab({
    Name = "Script Khác"
 });
+
 local Infor = MakeTab({
    Name = "Thông Tin"
 });
+
 local Inf = MakeTab({
    Name = "Thông Tin Script"
 });
+
 MakeNotifi({
   Title = "Linh tinh Hub",
   Text = "Cảm ơn vì đã sài script=)",
   Time = 5
 })
+
 do
 local TEXTURE = "rbxassetid://134973285396563"
 local faces = {
