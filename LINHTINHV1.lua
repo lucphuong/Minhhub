@@ -1,24 +1,3 @@
-local UserInputService = game:GetService("UserInputService")
-local StarterGui = game:GetService("StarterGui")
-repeat task.wait() 
-until pcall(function()
-    StarterGui:SetCore("SendNotification",{
-        Title = "Linh tinh hub",
-        Text = "Made by @phnglcth7",
-        Duration = 3
-    })
-end)
-local Enabled = false
-local function Notify(msg)
-    pcall(function()
-        StarterGui:SetCore("SendNotification",{
-            Title = "Đã Tải Thành Công!",
-            Text = msg,
-            Duration = 4.5
-        })
-    end)
-end
-Notify("Đã Chạy Thành Công!")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Seven7-lua/RedzLibs/refs/heads/main/src/RedzlibV2/source.lua"))()
 MakeWindow({
   Hub = {
